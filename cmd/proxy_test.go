@@ -14,6 +14,7 @@ import (
 func TestRunProxyRunsCodexWithActiveAccount(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv(paths.EnvHome, dir)
+	t.Setenv(EnvRealCodex, "/real/codex")
 
 	layout := paths.NewLayout(dir)
 	registry := state.NewRegistry()
@@ -48,6 +49,7 @@ func TestRunProxyRunsCodexWithActiveAccount(t *testing.T) {
 		ranCodex = true
 		assert.Equal(t, layout.CurrentHomeDir, opts.CodexHome)
 		assert.Equal(t, []string{"status"}, opts.Args)
+		assert.Equal(t, "/real/codex", opts.CodexCommand)
 		return nil
 	}
 

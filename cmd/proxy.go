@@ -5,6 +5,7 @@ package cmd
 
 import (
 	"errors"
+	"os"
 
 	"github.com/rickyroynardson/codex-switch/internal/codex"
 	"github.com/rickyroynardson/codex-switch/internal/paths"
@@ -17,6 +18,8 @@ var (
 	assembleRuntimeHome = runtimehome.Assemble
 	runCodexWithHome    = codex.RunWithHome
 )
+
+const EnvRealCodex = "CODEX_SWITCH_REAL_CODEX"
 
 // proxyCmd represents the proxy command
 var proxyCmd = &cobra.Command{
@@ -54,8 +57,9 @@ func runProxy(cmd *cobra.Command, args []string) error {
 	}
 
 	return runCodexWithHome(codex.RunOptions{
-		CodexHome: layout.CurrentHomeDir,
-		Args:      args,
+		CodexHome:    layout.CurrentHomeDir,
+		CodexCommand: os.Getenv(EnvRealCodex),
+		Args:         args,
 	})
 }
 
