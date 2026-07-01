@@ -7,12 +7,15 @@ import (
 	"slices"
 	"time"
 
+	"github.com/rickyroynardson/codex-switch/internal/codex"
 	"github.com/rickyroynardson/codex-switch/internal/paths"
 	"github.com/rickyroynardson/codex-switch/internal/state"
 )
 
 var SharedEntryNames = []string{
 	"config.toml",
+	"session_index.jsonl",
+	"history.jsonl",
 	"sessions",
 	"archived_sessions",
 	"skills",
@@ -23,6 +26,17 @@ var SharedEntryNames = []string{
 	"hooks",
 	"prompts",
 	"plugins",
+}
+
+var requiredSharedFiles = map[string]string{
+	"config.toml":         codex.FileAuthConfig + "\n",
+	"session_index.jsonl": "",
+	"history.jsonl":       "",
+}
+
+var requiredSharedDirs = map[string]struct{}{
+	"sessions":          {},
+	"archived_sessions": {},
 }
 
 func IsSharedEntry(name string) bool {
@@ -56,6 +70,19 @@ func Assemble(layout paths.Layout, account state.Account) error {
 
 	for _, name := range SharedEntryNames {
 		sharedPath := filepath.Join(layout.SharedDir, name)
+
+		if _, ok := requiredSharedDirs[name]; ok {
+			if err := os.MkdirAll(sharedPath, 0700); err != nil {
+				return err
+			}
+		}
+
+		if contents, ok := requiredSharedFiles[name]; ok {
+			if err := ensureSharedFile(sharedPath, contents); err != nil {
+				return err
+			}
+		}
+
 		if _, err := os.Stat(sharedPath); err != nil {
 			if os.IsNotExist(err) {
 				continue
@@ -92,4 +119,23 @@ func copyFile(src, dst string, perm os.FileMode) error {
 		return err
 	}
 	return os.WriteFile(dst, b, perm)
+}
+
+func ensureSharedFile(path, contents string) error {
+	info, err := os.Stat(path)
+	if err == nil {
+		if info.IsDir() {
+			return fmt.Errorf("shared file %s is a directory", path)
+		}
+		return nil
+	}
+	if !os.IsNotExist(err) {
+		return err
+	}
+
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		return err
+	}
+
+	return os.WriteFile(path, []byte(contents), 0600)
 }

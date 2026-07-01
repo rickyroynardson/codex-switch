@@ -5,9 +5,11 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/rickyroynardson/codex-switch/internal/codex"
 	"github.com/rickyroynardson/codex-switch/internal/paths"
 	"github.com/rickyroynardson/codex-switch/internal/state"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestIsSharedEntryReturnsTrueForAllowedEntries(t *testing.T) {
@@ -120,7 +122,7 @@ func TestAssembleSkipsMissingSharedEntries(t *testing.T) {
 	_, err = os.Lstat(filepath.Join(layout.CurrentHomeDir, "auth.json"))
 	assert.NoError(t, err)
 
-	_, err = os.Lstat(filepath.Join(layout.CurrentHomeDir, "config.toml"))
+	_, err = os.Lstat(filepath.Join(layout.CurrentHomeDir, "plugins"))
 	assert.True(t, os.IsNotExist(err))
 }
 
@@ -165,4 +167,102 @@ func TestAssembleReturnsErrorWhenAuthMissing(t *testing.T) {
 	err := Assemble(layout, account)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "account auth file not found")
+}
+
+func TestAssembleCreatesRequiredSharedDirs(t *testing.T) {
+	layout := paths.NewLayout(t.TempDir())
+	authPath := layout.AccountAuthPath("work")
+	writeAuthFile(t, authPath, `{}`)
+
+	account := state.Account{
+		Tag:      "work",
+		AuthPath: authPath,
+	}
+
+	err := Assemble(layout, account)
+	require.NoError(t, err)
+
+	for _, name := range []string{"sessions", "archived_sessions"} {
+		sharedPath := filepath.Join(layout.SharedDir, name)
+
+		sharedInfo, err := os.Stat(sharedPath)
+		require.NoError(t, err)
+		assert.True(t, sharedInfo.IsDir())
+
+		runtimePath := filepath.Join(layout.CurrentHomeDir, name)
+
+		runtimeInfo, err := os.Lstat(runtimePath)
+		require.NoError(t, err)
+		assert.NotZero(t, runtimeInfo.Mode()&os.ModeSymlink)
+
+		target, err := os.Readlink(runtimePath)
+		require.NoError(t, err)
+		assert.Equal(t, sharedPath, target)
+	}
+}
+
+func TestAssembleCreatesSharedConfigFile(t *testing.T) {
+	layout := paths.NewLayout(t.TempDir())
+	authPath := layout.AccountAuthPath("work")
+	writeAuthFile(t, authPath, `{}`)
+
+	account := state.Account{
+		Tag:      "work",
+		AuthPath: authPath,
+	}
+
+	err := Assemble(layout, account)
+	require.NoError(t, err)
+
+	sharedConfig := filepath.Join(layout.SharedDir, "config.toml")
+	b, err := os.ReadFile(sharedConfig)
+	require.NoError(t, err)
+	assert.Equal(t, codex.FileAuthConfig+"\n", string(b))
+
+	runtimeConfig := filepath.Join(layout.CurrentHomeDir, "config.toml")
+	info, err := os.Lstat(runtimeConfig)
+	require.NoError(t, err)
+	assert.NotZero(t, info.Mode()&os.ModeSymlink)
+
+	target, err := os.Readlink(runtimeConfig)
+	require.NoError(t, err)
+	assert.Equal(t, sharedConfig, target)
+}
+
+func TestAssembleDoesNotOverwriteExistingSharedConfigFile(t *testing.T) {
+	layout := paths.NewLayout(t.TempDir())
+	authPath := layout.AccountAuthPath("work")
+	writeAuthFile(t, authPath, `{}`)
+
+	if err := os.MkdirAll(layout.SharedDir, 0700); err != nil {
+		t.Fatalf("create shared dir: %v", err)
+	}
+
+	sharedConfig := filepath.Join(layout.SharedDir, "config.toml")
+	existingConfig := codex.FileAuthConfig + `
+
+[projects."/tmp/my-project"]
+trust_level = "trusted"
+`
+
+	if err := os.WriteFile(sharedConfig, []byte(existingConfig), 0600); err != nil {
+		t.Fatalf("write shared config: %v", err)
+	}
+
+	account := state.Account{
+		Tag:      "work",
+		AuthPath: authPath,
+	}
+
+	err := Assemble(layout, account)
+	require.NoError(t, err)
+
+	b, err := os.ReadFile(sharedConfig)
+	require.NoError(t, err)
+	assert.Equal(t, existingConfig, string(b))
+
+	runtimeConfig := filepath.Join(layout.CurrentHomeDir, "config.toml")
+	target, err := os.Readlink(runtimeConfig)
+	require.NoError(t, err)
+	assert.Equal(t, sharedConfig, target)
 }
