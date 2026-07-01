@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"encoding/base64"
 	"errors"
 	"os"
 	"path/filepath"
@@ -27,7 +28,12 @@ func TestRunLoginRegistersAccount(t *testing.T) {
 		}
 
 		authPath := filepath.Join(opts.CodexHome, "auth.json")
-		return os.WriteFile(authPath, []byte(`{}`), 0600)
+
+		header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"none"}`))
+		payload := base64.RawURLEncoding.EncodeToString([]byte(`{"email": "work@mail.com"}`))
+		idToken := header + "." + payload + "."
+		authJSON := `{"tokens": {"id_token": "` + idToken + `"}}`
+		return os.WriteFile(authPath, []byte(authJSON), 0600)
 	}
 
 	cmd, out := newTestCommandOutput()
@@ -44,6 +50,7 @@ func TestRunLoginRegistersAccount(t *testing.T) {
 	assert.True(t, ok)
 	assert.Equal(t, "work", registry.ActiveTag)
 	assert.Equal(t, "work", account.Tag)
+	assert.Equal(t, "work@mail.com", account.Email)
 	assert.Equal(t, layout.AccountAuthPath("work"), account.AuthPath)
 	assert.Equal(t, state.AuthStateReady, account.AuthState)
 	assert.NotEmpty(t, account.CreatedAt)

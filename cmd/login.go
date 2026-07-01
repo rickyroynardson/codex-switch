@@ -65,9 +65,15 @@ func runLogin(cmd *cobra.Command, args []string) error {
 		createdAt = existing.CreatedAt
 	}
 
+	email, err := codex.ReadEmailFromAuthFile(authPath)
+	if err != nil {
+		return err
+	}
+
 	registry.UpsertAccount(state.Account{
 		Tag:       tag,
 		AuthPath:  authPath,
+		Email:     email,
 		AuthState: state.AuthStateReady,
 		CreatedAt: createdAt,
 		UpdatedAt: now,
