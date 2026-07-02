@@ -51,3 +51,9 @@ func runCommand(command string, args []string, env []string) error {
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
 }
+
+func runCommandQuiet(command string, args, env []string) error {
+	cmd := exec.Command(command, args...)
+	cmd.Env = env
+	return cmd.Run()
+}
