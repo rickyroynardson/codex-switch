@@ -1,6 +1,8 @@
 package cmd
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/rickyroynardson/codex-switch/internal/paths"
@@ -133,4 +135,81 @@ func TestRunRemoveReturnsErrorForInvalidTag(t *testing.T) {
 
 	_, ok := registry.FindAccount("personal")
 	assert.True(t, ok)
+}
+
+func TestRunRemoveDeletesAccountDirectory(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv(paths.EnvHome, dir)
+
+	layout := paths.NewLayout(dir)
+	registry := state.NewRegistry()
+	registry.Accounts = []state.Account{
+		{
+			Tag: "personal",
+		},
+		{
+			Tag:      "work",
+			AuthPath: layout.AccountAuthPath("work"),
+		},
+	}
+	registry.ActiveTag = "personal"
+	err := state.SaveRegistry(layout.RegistryPath, registry)
+	assert.NoError(t, err)
+
+	writeAuthFile(t, layout.AccountAuthPath("work"), `{}`)
+
+	cmd, out := newTestCommandOutput()
+
+	err = runRemove(cmd, []string{"work"})
+	assert.NoError(t, err)
+	assert.Equal(t, "removed account work\n", out.String())
+
+	_, err = os.Stat(layout.AccountDir("work"))
+	assert.Error(t, err)
+	assert.True(t, os.IsNotExist(err))
+}
+
+func TestRunRemoveDoesNotDeleteDirectoryWhenRemoveFails(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv(paths.EnvHome, dir)
+
+	layout := paths.NewLayout(dir)
+	registry := state.NewRegistry()
+	registry.UpsertAccount(state.Account{
+		Tag:      "work",
+		AuthPath: layout.AccountAuthPath("work"),
+	})
+	err := state.SaveRegistry(layout.RegistryPath, registry)
+	assert.NoError(t, err)
+
+	writeAuthFile(t, layout.AccountAuthPath("work"), `{}`)
+
+	cmd, _ := newTestCommandOutput()
+
+	err = runRemove(cmd, []string{"work"})
+	assert.Error(t, err)
+	assert.Equal(t, "cannot remove active account", err.Error())
+
+	registry, err = state.LoadRegistry(layout.RegistryPath)
+	assert.NoError(t, err)
+	assert.Equal(t, "work", registry.ActiveTag)
+	assert.Len(t, registry.Accounts, 1)
+
+	_, ok := registry.FindAccount("work")
+	assert.True(t, ok)
+
+	_, err = os.Stat(layout.AccountDir("work"))
+	assert.NoError(t, err)
+}
+
+func writeAuthFile(t *testing.T, authPath, contents string) {
+	t.Helper()
+
+	if err := os.MkdirAll(filepath.Dir(authPath), 0700); err != nil {
+		t.Fatalf("create auth dir: %v", err)
+	}
+
+	if err := os.WriteFile(authPath, []byte(contents), 0600); err != nil {
+		t.Fatalf("write auth file: %v", err)
+	}
 }

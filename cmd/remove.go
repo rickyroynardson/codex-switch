@@ -1,6 +1,8 @@
 package cmd
 
 import (
+	"os"
+
 	"github.com/rickyroynardson/codex-switch/internal/paths"
 	"github.com/rickyroynardson/codex-switch/internal/state"
 	"github.com/spf13/cobra"
@@ -34,6 +36,10 @@ func runRemove(cmd *cobra.Command, args []string) error {
 	}
 
 	if err := state.SaveRegistry(layout.RegistryPath, registry); err != nil {
+		return err
+	}
+
+	if err := os.RemoveAll(layout.AccountDir(tag)); err != nil {
 		return err
 	}
 
