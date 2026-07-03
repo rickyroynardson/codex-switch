@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"errors"
-	"os"
 
 	"github.com/rickyroynardson/codex-switch/internal/codex"
 	"github.com/rickyroynardson/codex-switch/internal/paths"
@@ -46,9 +45,14 @@ func runProxy(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	codexCommand, err := realCodexCommand(layout)
+	if err != nil {
+		return err
+	}
+
 	return runCodexWithHome(codex.RunOptions{
 		CodexHome:    layout.CurrentHomeDir,
-		CodexCommand: os.Getenv(EnvRealCodex),
+		CodexCommand: codexCommand,
 		Args:         args,
 	})
 }

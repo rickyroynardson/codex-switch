@@ -12,6 +12,27 @@ import (
 )
 
 var checkCodexLoginStatus = codex.CheckLoginStatus
+var probeCodexAccountLimits = codex.ProbeAccountLimits
+
+func formatRemainingPercent(used *int) string {
+	if used == nil {
+		return "unknown"
+	}
+
+	remaining := 100 - *used
+	if remaining < 0 {
+		remaining = 0
+	}
+
+	return fmt.Sprintf("%d%%", remaining)
+}
+
+func formatStatusValue(value string) string {
+	if value == "" {
+		return "unknown"
+	}
+	return value
+}
 
 var statusCmd = &cobra.Command{
 	Use:   "status",
@@ -36,7 +57,12 @@ func runStatus(cmd *cobra.Command, args []string) error {
 	}
 
 	w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "ACTIVE\tTAG\tAUTH\tACCOUNT")
+	fmt.Fprintln(w, "ACTIVE\tTAG\t5H_LEFT\tWEEKLY_LEFT\t5H_RESET\tWEEKLY_RESET\tAUTH\tACCOUNT")
+
+	codexCommand, err := realCodexCommand(layout)
+	if err != nil {
+		return err
+	}
 
 	for i, account := range registry.Accounts {
 		active := ""
@@ -49,7 +75,8 @@ func runStatus(cmd *cobra.Command, args []string) error {
 		}
 
 		ready, err := checkCodexLoginStatus(codex.LoginStatusOptions{
-			CodexHome: layout.AccountDir(account.Tag),
+			CodexHome:    layout.AccountDir(account.Tag),
+			CodexCommand: codexCommand,
 		})
 		if err != nil {
 			return err
@@ -78,7 +105,24 @@ func runStatus(cmd *cobra.Command, args []string) error {
 			authState = state.AuthStateUnknown
 		}
 
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", active, account.Tag, authState, email)
+		snapshot := codex.UnknownRateLimitSnapshot("unknown")
+		if account.AuthState == state.AuthStateReady {
+			snapshot = probeCodexAccountLimits(codex.ProbeAccountLimitsOptions{
+				CodexHome:    layout.AccountDir(account.Tag),
+				CodexCommand: codexCommand,
+			})
+		}
+
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+			active,
+			account.Tag,
+			formatRemainingPercent(snapshot.FiveHourUsedPct),
+			formatRemainingPercent(snapshot.WeeklyUsedPct),
+			formatStatusValue(snapshot.FiveHourResetIn),
+			formatStatusValue(snapshot.WeeklyResetIn),
+			authState,
+			email,
+		)
 	}
 
 	if err := w.Flush(); err != nil {

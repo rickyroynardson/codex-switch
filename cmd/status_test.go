@@ -33,6 +33,19 @@ func stubCheckCodexLoginStatus(t *testing.T, ready bool) {
 	}
 }
 
+func stubProbeCodexAccountLimits(t *testing.T, snapshot codex.RateLimitSnapshot) {
+	t.Helper()
+
+	old := probeCodexAccountLimits
+	t.Cleanup(func() {
+		probeCodexAccountLimits = old
+	})
+
+	probeCodexAccountLimits = func(opts codex.ProbeAccountLimitsOptions) codex.RateLimitSnapshot {
+		return snapshot
+	}
+}
+
 func TestRunStatusPrintsNoAccounts(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv(paths.EnvHome, dir)
@@ -48,6 +61,7 @@ func TestRunStatusPrintsAccounts(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv(paths.EnvHome, dir)
 	stubCheckCodexLoginStatus(t, true)
+	stubProbeCodexAccountLimits(t, codex.UnknownRateLimitSnapshot("test"))
 
 	layout := paths.NewLayout(dir)
 	registry := state.NewRegistry()
@@ -124,4 +138,70 @@ func TestRunStatusRefreshesAuthStateNeedsLogin(t *testing.T) {
 	account, ok := registry.FindAccount("work")
 	assert.True(t, ok)
 	assert.Equal(t, state.AuthStateNeedsLogin, account.AuthState)
+}
+
+func TestRunStatusPrintsQuota(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv(paths.EnvHome, dir)
+	stubCheckCodexLoginStatus(t, true)
+
+	fiveHourUsed := 25
+	weeklyUsed := 50
+	stubProbeCodexAccountLimits(t, codex.RateLimitSnapshot{
+		FiveHourUsedPct: &fiveHourUsed,
+		WeeklyUsedPct:   &weeklyUsed,
+		FiveHourResetIn: "1h",
+		WeeklyResetIn:   "1d",
+		RawLimitSource:  "test",
+	})
+
+	layout := paths.NewLayout(dir)
+	registry := state.NewRegistry()
+	registry.UpsertAccount(state.Account{
+		Tag:      "work",
+		AuthPath: layout.AccountAuthPath("work"),
+		Email:    "work@mail.com",
+	})
+	err := state.SaveRegistry(layout.RegistryPath, registry)
+	require.NoError(t, err)
+
+	cmd, out := newTestCommandOutput()
+
+	err = runStatus(cmd, nil)
+	require.NoError(t, err)
+
+	assert.Contains(t, out.String(), "5H_LEFT")
+	assert.Contains(t, out.String(), "WEEKLY_LEFT")
+	assert.Contains(t, out.String(), "75%")
+	assert.Contains(t, out.String(), "50%")
+	assert.Contains(t, out.String(), "1h")
+	assert.Contains(t, out.String(), "1d")
+}
+
+func TestRunStatusDoesNotProbeQuotaWhenNeedsLogin(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv(paths.EnvHome, dir)
+	stubCheckCodexLoginStatus(t, false)
+
+	old := probeCodexAccountLimits
+	t.Cleanup(func() {
+		probeCodexAccountLimits = old
+	})
+	probeCodexAccountLimits = func(opts codex.ProbeAccountLimitsOptions) codex.RateLimitSnapshot {
+		t.Fatalf("probeCodexAccountLimits should not be called")
+		return codex.RateLimitSnapshot{}
+	}
+
+	layout := paths.NewLayout(dir)
+	registry := state.NewRegistry()
+	registry.UpsertAccount(state.Account{
+		Tag:      "work",
+		AuthPath: layout.AccountAuthPath("work"),
+	})
+	require.NoError(t, state.SaveRegistry(layout.RegistryPath, registry))
+
+	cmd, _ := newTestCommandOutput()
+
+	err := runStatus(cmd, nil)
+	require.NoError(t, err)
 }
