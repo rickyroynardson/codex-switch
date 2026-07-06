@@ -266,3 +266,67 @@ trust_level = "trusted"
 	require.NoError(t, err)
 	assert.Equal(t, sharedConfig, target)
 }
+
+func TestImportSharedStateCopiesSharedEntities(t *testing.T) {
+	layout := paths.NewLayout(t.TempDir())
+	sourceHome := filepath.Join(t.TempDir(), ".codex")
+
+	if err := os.MkdirAll(filepath.Join(sourceHome, "sessions"), 0700); err != nil {
+		t.Fatalf("failed create source sessions: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sourceHome, "config.toml"), []byte(`model="gpt-5"`), 0600); err != nil {
+		t.Fatalf("failed create source config.toml: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sourceHome, "sessions", "one.jsonl"), []byte("{}\n"), 0600); err != nil {
+		t.Fatalf("failed create source session: %v", err)
+	}
+
+	err := ImportSharedState(layout, sourceHome)
+	assert.NoError(t, err)
+
+	config, err := os.ReadFile(filepath.Join(layout.SharedDir, "config.toml"))
+	assert.NoError(t, err)
+	assert.Contains(t, string(config), `model="gpt-5"`)
+
+	session, err := os.ReadFile(filepath.Join(layout.SharedDir, "sessions", "one.jsonl"))
+	assert.NoError(t, err)
+	assert.Equal(t, "{}\n", string(session))
+}
+
+func TestImportSharedStateSkipsSensitiveEntries(t *testing.T) {
+	layout := paths.NewLayout(t.TempDir())
+	sourceHome := filepath.Join(t.TempDir(), ".codex")
+
+	if err := os.MkdirAll(sourceHome, 0700); err != nil {
+		t.Fatalf("failed create source home: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sourceHome, "auth.json"), []byte(`secret`), 0600); err != nil {
+		t.Fatalf("failed write auth: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sourceHome, "mcp_oauth.json"), []byte(`secret`), 0600); err != nil {
+		t.Fatalf("failed write mcp auth: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sourceHome, "logs_2.sqlite"), []byte(`logs`), 0600); err != nil {
+		t.Fatalf("failed write logs: %v", err)
+	}
+
+	err := ImportSharedState(layout, sourceHome)
+	assert.NoError(t, err)
+
+	_, err = os.Stat(filepath.Join(layout.SharedDir, "auth.json"))
+	assert.True(t, os.IsNotExist(err))
+
+	_, err = os.Stat(filepath.Join(layout.SharedDir, "mcp_oauth.json"))
+	assert.True(t, os.IsNotExist(err))
+
+	_, err = os.Stat(filepath.Join(layout.SharedDir, "logs_2.sqlite"))
+	assert.True(t, os.IsNotExist(err))
+}
+
+func TestImportSharedStateIgnoresMissingSource(t *testing.T) {
+	layout := paths.NewLayout(t.TempDir())
+	sourceHome := filepath.Join(t.TempDir(), ".codex-missing")
+
+	err := ImportSharedState(layout, sourceHome)
+	assert.NoError(t, err)
+}

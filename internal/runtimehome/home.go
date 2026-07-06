@@ -121,6 +121,45 @@ func copyFile(src, dst string, perm os.FileMode) error {
 	return os.WriteFile(dst, b, perm)
 }
 
+func copyDir(src, dst string) error {
+	return filepath.WalkDir(src, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+
+		rel, err := filepath.Rel(src, path)
+		if err != nil {
+			return err
+		}
+
+		target := filepath.Join(dst, rel)
+
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+
+		if entry.IsDir() {
+			return os.MkdirAll(target, info.Mode().Perm())
+		}
+
+		return copyFile(path, target, info.Mode().Perm())
+	})
+}
+
+func copyPath(src, dst string) error {
+	info, err := os.Stat(src)
+	if err != nil {
+		return err
+	}
+
+	if info.IsDir() {
+		return copyDir(src, dst)
+	}
+
+	return copyFile(src, dst, info.Mode().Perm())
+}
+
 func ensureSharedFile(path, contents string) error {
 	info, err := os.Stat(path)
 	if err == nil {
@@ -138,4 +177,35 @@ func ensureSharedFile(path, contents string) error {
 	}
 
 	return os.WriteFile(path, []byte(contents), 0600)
+}
+
+func ImportSharedState(layout paths.Layout, sourceHome string) error {
+	if _, err := os.Stat(sourceHome); err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+
+	if err := os.MkdirAll(layout.SharedDir, 0700); err != nil {
+		return err
+	}
+
+	for _, name := range SharedEntryNames {
+		sourcePath := filepath.Join(sourceHome, name)
+		targetPath := filepath.Join(layout.SharedDir, name)
+
+		if _, err := os.Stat(sourcePath); err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return err
+		}
+
+		if err := copyPath(sourcePath, targetPath); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
