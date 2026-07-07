@@ -330,3 +330,44 @@ func TestImportSharedStateIgnoresMissingSource(t *testing.T) {
 	err := ImportSharedState(layout, sourceHome)
 	assert.NoError(t, err)
 }
+
+func TestPersistSharedStateCopiesRuntimeCreatedSharedFile(t *testing.T) {
+	layout := paths.NewLayout(t.TempDir())
+
+	if err := os.MkdirAll(layout.CurrentHomeDir, 0700); err != nil {
+		t.Fatalf("failed create current home: %v", err)
+	}
+
+	runtimePath := filepath.Join(layout.CurrentHomeDir, "AGENTS.md")
+	if err := os.WriteFile(runtimePath, []byte("shared instructions"), 0600); err != nil {
+		t.Fatalf("failed write runtime shared file: %v", err)
+	}
+
+	err := PersistSharedState(layout)
+	assert.NoError(t, err)
+
+	b, err := os.ReadFile(filepath.Join(layout.SharedDir, "AGENTS.md"))
+	assert.NoError(t, err)
+	assert.Equal(t, "shared instructions", string(b))
+}
+
+func TestPersistSharedStateCopiesRuntimeCreatedSharedDir(t *testing.T) {
+	layout := paths.NewLayout(t.TempDir())
+
+	runtimePromptsDir := filepath.Join(layout.CurrentHomeDir, "prompts")
+	if err := os.MkdirAll(runtimePromptsDir, 0700); err != nil {
+		t.Fatalf("failed create runtime prompts dir: %v", err)
+	}
+
+	runtimePromptPath := filepath.Join(runtimePromptsDir, "REVIEW.md")
+	if err := os.WriteFile(runtimePromptPath, []byte("review prompt"), 0600); err != nil {
+		t.Fatalf("failed write runtime prompt: %v", err)
+	}
+
+	err := PersistSharedState(layout)
+	assert.NoError(t, err)
+
+	b, err := os.ReadFile(runtimePromptPath)
+	assert.NoError(t, err)
+	assert.Equal(t, "review prompt", string(b))
+}

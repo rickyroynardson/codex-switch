@@ -11,8 +11,9 @@ import (
 )
 
 var (
-	assembleRuntimeHome = runtimehome.Assemble
-	runCodexWithHome    = codex.RunWithHome
+	assembleRuntimeHome       = runtimehome.Assemble
+	persistRuntimeSharedState = runtimehome.PersistSharedState
+	runCodexWithHome          = codex.RunWithHome
 )
 
 const EnvRealCodex = "CODEX_SWITCH_REAL_CODEX"
@@ -50,11 +51,19 @@ func runProxy(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	return runCodexWithHome(codex.RunOptions{
+	runErr := runCodexWithHome(codex.RunOptions{
 		CodexHome:    layout.CurrentHomeDir,
 		CodexCommand: codexCommand,
 		Args:         args,
 	})
+
+	// try to persist the runtime-created shared state even if the Codex exits with an error.
+	persistErr := persistRuntimeSharedState(layout)
+	if runErr != nil {
+		return runErr
+	}
+
+	return persistErr
 }
 
 func init() {

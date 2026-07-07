@@ -28,6 +28,18 @@ func TestRunProxyRunsCodexWithActiveAccount(t *testing.T) {
 
 	assembled := false
 	ranCodex := false
+	persisted := false
+
+	oldPersistRuntimeSharedState := persistRuntimeSharedState
+	t.Cleanup(func() {
+		persistRuntimeSharedState = oldPersistRuntimeSharedState
+	})
+
+	persistRuntimeSharedState = func(gotLayout paths.Layout) error {
+		persisted = true
+		assert.Equal(t, layout.CurrentHomeDir, gotLayout.CurrentHomeDir)
+		return nil
+	}
 
 	oldAssembleRuntimeHome := assembleRuntimeHome
 	t.Cleanup(func() {
@@ -59,6 +71,7 @@ func TestRunProxyRunsCodexWithActiveAccount(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, assembled)
 	assert.True(t, ranCodex)
+	assert.True(t, persisted)
 }
 
 func TestRunProxyReturnsErrorWhenNoActiveAccount(t *testing.T) {
@@ -168,4 +181,97 @@ func TestRunProxyReturnsErrorWhenCodexRunFails(t *testing.T) {
 	err = runProxy(cmd, []string{"status"})
 	require.Error(t, err)
 	assert.Equal(t, "run error", err.Error())
+}
+
+func TestRunProxyPersistsSharedStateWhenCodexRunFails(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv(paths.EnvHome, dir)
+	t.Setenv(EnvRealCodex, "/real/codex")
+
+	layout := paths.NewLayout(dir)
+	registry := state.NewRegistry()
+	registry.UpsertAccount(state.Account{
+		Tag:      "work",
+		AuthPath: layout.AccountAuthPath("work"),
+	})
+	err := state.SaveRegistry(layout.RegistryPath, registry)
+	assert.NoError(t, err)
+
+	oldAssembleRuntimeHome := assembleRuntimeHome
+	t.Cleanup(func() {
+		assembleRuntimeHome = oldAssembleRuntimeHome
+	})
+	assembleRuntimeHome = func(layout paths.Layout, account state.Account) error {
+		return nil
+	}
+
+	oldRunCodexWithHome := runCodexWithHome
+	t.Cleanup(func() {
+		runCodexWithHome = oldRunCodexWithHome
+	})
+	runCodexWithHome = func(opts codex.RunOptions) error {
+		return errors.New("run error")
+	}
+
+	persisted := false
+	oldPersistRuntimeSharedState := persistRuntimeSharedState
+	t.Cleanup(func() {
+		persistRuntimeSharedState = oldPersistRuntimeSharedState
+	})
+	persistRuntimeSharedState = func(gotLayout paths.Layout) error {
+		persisted = true
+		return nil
+	}
+
+	cmd, _ := newTestCommandOutput()
+
+	err = runProxy(cmd, []string{"status"})
+	assert.Error(t, err)
+	assert.Equal(t, "run error", err.Error())
+	assert.True(t, persisted)
+}
+
+func TestRunProxyReturnsErrorWhenPersistSharedStateFails(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv(paths.EnvHome, dir)
+	t.Setenv(EnvRealCodex, "/real/codex")
+
+	layout := paths.NewLayout(dir)
+	registry := state.NewRegistry()
+	registry.UpsertAccount(state.Account{
+		Tag:      "work",
+		AuthPath: layout.AccountAuthPath("work"),
+	})
+	err := state.SaveRegistry(layout.RegistryPath, registry)
+	assert.NoError(t, err)
+
+	oldAssembleRuntimeHome := assembleRuntimeHome
+	t.Cleanup(func() {
+		assembleRuntimeHome = oldAssembleRuntimeHome
+	})
+	assembleRuntimeHome = func(layout paths.Layout, account state.Account) error {
+		return nil
+	}
+
+	oldRunCodexWithHome := runCodexWithHome
+	t.Cleanup(func() {
+		runCodexWithHome = oldRunCodexWithHome
+	})
+	runCodexWithHome = func(opts codex.RunOptions) error {
+		return nil
+	}
+
+	oldPersistRuntimeSharedState := persistRuntimeSharedState
+	t.Cleanup(func() {
+		persistRuntimeSharedState = oldPersistRuntimeSharedState
+	})
+	persistRuntimeSharedState = func(gotLayout paths.Layout) error {
+		return errors.New("persist error")
+	}
+
+	cmd, _ := newTestCommandOutput()
+
+	err = runProxy(cmd, []string{"status"})
+	assert.Error(t, err)
+	assert.Equal(t, "persist error", err.Error())
 }

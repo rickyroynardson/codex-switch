@@ -209,3 +209,42 @@ func ImportSharedState(layout paths.Layout, sourceHome string) error {
 
 	return nil
 }
+
+func PersistSharedState(layout paths.Layout) error {
+	entries, err := os.ReadDir(layout.CurrentHomeDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+
+	if err := os.MkdirAll(layout.SharedDir, 0700); err != nil {
+		return err
+	}
+
+	for _, entry := range entries {
+		name := entry.Name()
+		if !IsSharedEntry(name) {
+			continue
+		}
+
+		runtimePath := filepath.Join(layout.CurrentHomeDir, name)
+
+		info, err := os.Lstat(runtimePath)
+		if err != nil {
+			return err
+		}
+
+		if info.Mode()&os.ModeSymlink != 0 {
+			continue
+		}
+
+		sharedPath := filepath.Join(layout.SharedDir, name)
+		if err := copyPath(runtimePath, sharedPath); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
