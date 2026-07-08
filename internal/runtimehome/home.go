@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/rickyroynardson/codex-switch/internal/codex"
@@ -166,6 +167,17 @@ func ensureSharedFile(path, contents string) error {
 		if info.IsDir() {
 			return fmt.Errorf("shared file %s is a directory", path)
 		}
+
+		if filepath.Base(path) == "config.toml" {
+			b, err := os.ReadFile(path)
+			if err != nil {
+				return err
+			}
+
+			normalized := normalizeSharedConfigContents(string(b))
+			return os.WriteFile(path, []byte(normalized+"\n"), 0600)
+		}
+
 		return nil
 	}
 	if !os.IsNotExist(err) {
@@ -174,6 +186,10 @@ func ensureSharedFile(path, contents string) error {
 
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 		return err
+	}
+
+	if filepath.Base(path) == "config.toml" {
+		contents = normalizeSharedConfigContents(contents) + "\n"
 	}
 
 	return os.WriteFile(path, []byte(contents), 0600)
@@ -200,6 +216,13 @@ func ImportSharedState(layout paths.Layout, sourceHome string) error {
 				continue
 			}
 			return err
+		}
+
+		if name == "config.toml" {
+			if err := copyNormalizedConfig(sourcePath, targetPath); err != nil {
+				return err
+			}
+			continue
 		}
 
 		if err := copyPath(sourcePath, targetPath); err != nil {
@@ -241,10 +264,71 @@ func PersistSharedState(layout paths.Layout) error {
 		}
 
 		sharedPath := filepath.Join(layout.SharedDir, name)
+
+		if name == "config.toml" {
+			if err := copyNormalizedConfig(runtimePath, sharedPath); err != nil {
+				return err
+			}
+			continue
+		}
+
 		if err := copyPath(runtimePath, sharedPath); err != nil {
 			return err
 		}
 	}
 
 	return nil
+}
+
+func normalizeSharedConfigContents(contents string) string {
+	lines := strings.Split(contents, "\n")
+	sanitized := make([]string, 0, len(lines))
+
+	for _, line := range lines {
+		if strings.HasPrefix(strings.TrimSpace(line), "cli_auth_credentials_store = ") {
+			continue
+		}
+		sanitized = append(sanitized, line)
+	}
+
+	firstTableIndex := -1
+	for i, line := range sanitized {
+		if strings.HasPrefix(strings.TrimSpace(line), "[") {
+			firstTableIndex = i
+			break
+		}
+	}
+
+	authLine := strings.TrimSpace(codex.FileAuthConfig)
+
+	if firstTableIndex == -1 {
+		topLevel := strings.TrimSpace(strings.Join(sanitized, "\n"))
+		if topLevel == "" {
+			return authLine
+		}
+		return topLevel + "\n" + authLine
+	}
+
+	topLevel := strings.TrimSpace(strings.Join(sanitized[:firstTableIndex], "\n"))
+	tables := strings.TrimSpace(strings.Join(sanitized[firstTableIndex:], "\n"))
+
+	if topLevel == "" {
+		return authLine + "\n\n" + tables
+	}
+
+	return topLevel + "\n" + authLine + "\n\n" + tables
+}
+
+func copyNormalizedConfig(src, dst string) error {
+	b, err := os.ReadFile(src)
+	if err != nil {
+		return err
+	}
+
+	if err := os.MkdirAll(filepath.Dir(dst), 0700); err != nil {
+		return err
+	}
+
+	normalized := normalizeSharedConfigContents(string(b))
+	return os.WriteFile(dst, []byte(normalized+"\n"), 0600)
 }

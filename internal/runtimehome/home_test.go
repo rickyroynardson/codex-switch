@@ -367,7 +367,140 @@ func TestPersistSharedStateCopiesRuntimeCreatedSharedDir(t *testing.T) {
 	err := PersistSharedState(layout)
 	assert.NoError(t, err)
 
-	b, err := os.ReadFile(runtimePromptPath)
+	b, err := os.ReadFile(filepath.Join(layout.SharedDir, "prompts", "REVIEW.md"))
 	assert.NoError(t, err)
 	assert.Equal(t, "review prompt", string(b))
+}
+
+func TestNormalizeSharedConfigAddsFileAuthToEmptyConfig(t *testing.T) {
+	got := normalizeSharedConfigContents("")
+	assert.Equal(t, `cli_auth_credentials_store = "file"`, got)
+}
+
+func TestNormalizeSharedConfigPreservesTopLevelConfig(t *testing.T) {
+	input := `model = "gpt-5"`
+	got := normalizeSharedConfigContents(input)
+
+	assert.Equal(t, `model = "gpt-5"
+cli_auth_credentials_store = "file"`, got)
+}
+
+func TestNormalizeSharedConfigInsertsFileAuthBeforeTables(t *testing.T) {
+	input := `model = "gpt-5"
+
+[projects."/tmp/project"]
+trust_level = "trusted"`
+
+	got := normalizeSharedConfigContents(input)
+
+	assert.Equal(t, `model = "gpt-5"
+cli_auth_credentials_store = "file"
+
+[projects."/tmp/project"]
+trust_level = "trusted"`, got)
+}
+
+func TestNormalizeSharedConfigReplacesExistingAuthStore(t *testing.T) {
+	input := `cli_auth_credentials_store = "keychain"
+model = "gpt-5"`
+
+	got := normalizeSharedConfigContents(input)
+
+	assert.Equal(t, `model = "gpt-5"
+cli_auth_credentials_store = "file"`, got)
+}
+
+func TestAssembleNormalizesExistingSharedConfigFile(t *testing.T) {
+	layout := paths.NewLayout(t.TempDir())
+	authPath := layout.AccountAuthPath("work")
+	writeAuthFile(t, authPath, `{}`)
+
+	if err := os.MkdirAll(layout.SharedDir, 0700); err != nil {
+		t.Fatalf("failed create shared dir: %v", err)
+	}
+
+	sharedConfig := filepath.Join(layout.SharedDir, "config.toml")
+	existingConfig := `model = "gpt-5"
+
+[projects."/tmp/my-project"]
+trust_level = "trusted"
+`
+
+	if err := os.WriteFile(sharedConfig, []byte(existingConfig), 0600); err != nil {
+		t.Fatalf("failed write shared config: %v", err)
+	}
+
+	account := state.Account{
+		Tag:      "work",
+		AuthPath: authPath,
+	}
+
+	err := Assemble(layout, account)
+	assert.NoError(t, err)
+
+	b, err := os.ReadFile(sharedConfig)
+	assert.NoError(t, err)
+
+	assert.Equal(t, `model = "gpt-5"
+cli_auth_credentials_store = "file"
+
+[projects."/tmp/my-project"]
+trust_level = "trusted"
+`, string(b))
+}
+
+func TestImportSharedStateNormalizesConfig(t *testing.T) {
+	layout := paths.NewLayout(t.TempDir())
+	sourceHome := filepath.Join(t.TempDir(), ".codex")
+
+	if err := os.MkdirAll(sourceHome, 0700); err != nil {
+		t.Fatalf("create source home: %v", err)
+	}
+
+	sourceConfig := `model = "gpt-5"
+
+[projects."/tmp/project"]
+trust_level = "trusted"
+`
+	if err := os.WriteFile(filepath.Join(sourceHome, "config.toml"), []byte(sourceConfig), 0600); err != nil {
+		t.Fatalf("write source config: %v", err)
+	}
+
+	err := ImportSharedState(layout, sourceHome)
+	require.NoError(t, err)
+
+	b, err := os.ReadFile(filepath.Join(layout.SharedDir, "config.toml"))
+	require.NoError(t, err)
+
+	assert.Equal(t, `model = "gpt-5"
+cli_auth_credentials_store = "file"
+
+[projects."/tmp/project"]
+trust_level = "trusted"
+`, string(b))
+}
+
+func TestPersistSharedStateNormalizesRuntimeConfig(t *testing.T) {
+	layout := paths.NewLayout(t.TempDir())
+
+	if err := os.MkdirAll(layout.CurrentHomeDir, 0700); err != nil {
+		t.Fatalf("create current home: %v", err)
+	}
+
+	runtimeConfig := `cli_auth_credentials_store = "keychain"
+model = "gpt-5"
+`
+	if err := os.WriteFile(filepath.Join(layout.CurrentHomeDir, "config.toml"), []byte(runtimeConfig), 0600); err != nil {
+		t.Fatalf("write runtime config: %v", err)
+	}
+
+	err := PersistSharedState(layout)
+	require.NoError(t, err)
+
+	b, err := os.ReadFile(filepath.Join(layout.SharedDir, "config.toml"))
+	require.NoError(t, err)
+
+	assert.Equal(t, `model = "gpt-5"
+cli_auth_credentials_store = "file"
+`, string(b))
 }
