@@ -205,3 +205,101 @@ func TestRunStatusDoesNotProbeQuotaWhenNeedsLogin(t *testing.T) {
 	err := runStatus(cmd, nil)
 	require.NoError(t, err)
 }
+
+func TestRunStatusPrintsSingleAccountDetail(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv(paths.EnvHome, dir)
+	stubCheckCodexLoginStatus(t, true)
+
+	fiveHourUsed := 25
+	weeklyUsed := 50
+	stubProbeCodexAccountLimits(t, codex.RateLimitSnapshot{
+		FiveHourUsedPct: &fiveHourUsed,
+		WeeklyUsedPct:   &weeklyUsed,
+		FiveHourResetIn: "1h",
+		WeeklyResetIn:   "1d",
+		RawLimitSource:  "test-source",
+	})
+
+	layout := paths.NewLayout(dir)
+	registry := state.NewRegistry()
+	registry.UpsertAccount(state.Account{
+		Tag:      "work",
+		AuthPath: layout.AccountAuthPath("work"),
+		Email:    "work@mail.com",
+	})
+	assert.NoError(t, state.SaveRegistry(layout.RegistryPath, registry))
+
+	cmd, out := newTestCommandOutput()
+	cmd.Flags().StringP("tag", "t", "work", "")
+
+	err := runStatus(cmd, nil)
+	assert.NoError(t, err)
+
+	output := out.String()
+	assert.Contains(t, output, "tag: work")
+	assert.Contains(t, output, "active: yes")
+	assert.Contains(t, output, "five_hour_left_pct: 75%")
+	assert.Contains(t, output, "weekly_left_pct: 50%")
+	assert.Contains(t, output, "five_hour_reset_in: 1h")
+	assert.Contains(t, output, "weekly_reset_in: 1d")
+	assert.Contains(t, output, "raw_limit_source: test-source")
+	assert.Contains(t, output, "account: work@mail.com")
+	assert.Contains(t, output, "auth_state: ready")
+	assert.Contains(t, output, "auth_storage_path:")
+}
+
+func TestRunStatusSingleAccountReturnsErrorForUnknownTag(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv(paths.EnvHome, dir)
+
+	layout := paths.NewLayout(dir)
+	registry := state.NewRegistry()
+	registry.UpsertAccount(state.Account{
+		Tag:      "work",
+		AuthPath: layout.AccountAuthPath("work"),
+	})
+	assert.NoError(t, state.SaveRegistry(layout.RegistryPath, registry))
+
+	cmd, _ := newTestCommandOutput()
+	cmd.Flags().StringP("tag", "t", "personal", "")
+
+	err := runStatus(cmd, nil)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "unknown account tag: personal")
+}
+
+func TestRunStatusSingleAccountNeedsLoginDetail(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv(paths.EnvHome, dir)
+	stubCheckCodexLoginStatus(t, false)
+
+	old := probeCodexAccountLimits
+	t.Cleanup(func() {
+		probeCodexAccountLimits = old
+	})
+	probeCodexAccountLimits = func(opts codex.ProbeAccountLimitsOptions) codex.RateLimitSnapshot {
+		t.Fatalf("probeCodexAccountLimits should not be called")
+		return codex.RateLimitSnapshot{}
+	}
+
+	layout := paths.NewLayout(dir)
+	registry := state.NewRegistry()
+	registry.UpsertAccount(state.Account{
+		Tag:      "work",
+		AuthPath: layout.AccountAuthPath("work"),
+	})
+	assert.NoError(t, state.SaveRegistry(layout.RegistryPath, registry))
+
+	cmd, out := newTestCommandOutput()
+	cmd.Flags().StringP("tag", "t", "work", "")
+
+	err := runStatus(cmd, nil)
+	assert.NoError(t, err)
+
+	output := out.String()
+	assert.Contains(t, output, "tag: work")
+	assert.Contains(t, output, "auth_state: needs_login")
+	assert.Contains(t, output, "five_hour_left_pct: unknown")
+	assert.Contains(t, output, "weekly_left_pct: unknown")
+}
