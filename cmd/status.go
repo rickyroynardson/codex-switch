@@ -54,16 +54,24 @@ func runStatus(cmd *cobra.Command, args []string) error {
 	}
 
 	tag := statusTagFromCommand(cmd)
+	refresh := statusRefreshFromCommand(cmd)
 
 	if len(registry.Accounts) == 0 && tag == "" {
 		fmt.Fprintln(cmd.OutOrStdout(), "no accounts")
 		return nil
 	}
 
-	codexCommand, err := realCodexCommand(layout)
-	if err != nil {
-		return err
+	// Only the refresh path spawns codex, so a plain cache read needs neither
+	// the binary on PATH nor a registry write.
+	codexCommand := ""
+	if refresh {
+		codexCommand, err = realCodexCommand(layout)
+		if err != nil {
+			return err
+		}
 	}
+
+	now := time.Now()
 
 	if tag != "" {
 		for i, account := range registry.Accounts {
@@ -71,14 +79,17 @@ func runStatus(cmd *cobra.Command, args []string) error {
 				continue
 			}
 
-			account, snapshot, err := refreshAccountStatus(layout, account, codexCommand)
-			if err != nil {
-				return err
-			}
+			snapshot := cachedRateLimitSnapshot(account)
+			if refresh {
+				account, snapshot, err = refreshAccountStatus(layout, account, codexCommand)
+				if err != nil {
+					return err
+				}
 
-			registry.Accounts[i] = account
-			if err := state.SaveRegistry(layout.RegistryPath, registry); err != nil {
-				return err
+				registry.Accounts[i] = account
+				if err := state.SaveRegistry(layout.RegistryPath, registry); err != nil {
+					return err
+				}
 			}
 
 			printAccountStatusDetail(cmd, layout, registry, account, snapshot)
@@ -89,35 +100,42 @@ func runStatus(cmd *cobra.Command, args []string) error {
 	}
 
 	w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "ACTIVE\tTAG\t5H_LEFT\tWEEKLY_LEFT\t5H_RESET\tWEEKLY_RESET\tAUTH\tACCOUNT")
+	fmt.Fprintln(w, "ACTIVE\tTAG\t5H_LEFT\tWEEKLY_LEFT\t5H_RESET\tWEEKLY_RESET\tAUTH\tACCOUNT\tCHECKED")
 
+	changed := false
 	for i, account := range registry.Accounts {
 		active := ""
 		if account.Tag == registry.ActiveTag {
 			active = "*"
 		}
 
-		refreshed, snapshot, err := refreshAccountStatus(layout, account, codexCommand)
-		if err != nil {
-			return err
+		snapshot := cachedRateLimitSnapshot(account)
+		if refresh {
+			// ponytail: probes run serially; parallelize across accounts if
+			// anyone runs --refresh with enough accounts to feel it.
+			account, snapshot, err = refreshAccountStatus(layout, account, codexCommand)
+			if err != nil {
+				return err
+			}
+			registry.Accounts[i] = account
+			changed = true
 		}
 
-		registry.Accounts[i] = refreshed
-
-		authState := refreshed.AuthState
+		authState := account.AuthState
 		if authState == "" {
 			authState = state.AuthStateUnknown
 		}
 
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 			active,
-			refreshed.Tag,
+			account.Tag,
 			formatRemainingPercent(snapshot.FiveHourUsedPct),
 			formatRemainingPercent(snapshot.WeeklyUsedPct),
 			formatStatusValue(snapshot.FiveHourResetIn),
 			formatStatusValue(snapshot.WeeklyResetIn),
 			authState,
-			formatStatusValue(refreshed.Email),
+			formatStatusValue(account.Email),
+			formatCheckedAge(account.LastStatusCheckAt, now),
 		)
 	}
 
@@ -125,11 +143,16 @@ func runStatus(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	return state.SaveRegistry(layout.RegistryPath, registry)
+	if changed {
+		return state.SaveRegistry(layout.RegistryPath, registry)
+	}
+
+	return nil
 }
 
 func init() {
 	statusCmd.Flags().StringP("tag", "t", "", "Show status for a specific account tag")
+	statusCmd.Flags().Bool("refresh", false, "Probe Codex for live auth and quota instead of showing cached values")
 	rootCmd.AddCommand(statusCmd)
 }
 
@@ -140,6 +163,56 @@ func statusTagFromCommand(cmd *cobra.Command) string {
 	}
 
 	return flag.Value.String()
+}
+
+func statusRefreshFromCommand(cmd *cobra.Command) bool {
+	flag := cmd.Flags().Lookup("refresh")
+	if flag == nil {
+		return false
+	}
+
+	return flag.Value.String() == "true"
+}
+
+// cachedRateLimitSnapshot rebuilds a display snapshot from the account's last
+// persisted status, or an "never checked" placeholder when none exists.
+func cachedRateLimitSnapshot(account state.Account) codex.RateLimitSnapshot {
+	s := account.LastKnownStatus
+	if s == nil {
+		return codex.UnknownRateLimitSnapshot("never")
+	}
+
+	return codex.RateLimitSnapshot{
+		FiveHourUsedPct: s.FiveHourUsedPct,
+		WeeklyUsedPct:   s.WeeklyUsedPct,
+		FiveHourResetIn: s.FiveHourResetIn,
+		WeeklyResetIn:   s.WeeklyResetIn,
+		RawLimitSource:  s.RawLimitSource,
+		PlanType:        s.PlanType,
+	}
+}
+
+func formatCheckedAge(ts string, now time.Time) string {
+	if ts == "" {
+		return "never"
+	}
+
+	t, err := time.Parse(time.RFC3339, ts)
+	if err != nil {
+		return "unknown"
+	}
+
+	d := now.Sub(t)
+	switch {
+	case d < time.Minute:
+		return "just now"
+	case d < time.Hour:
+		return fmt.Sprintf("%dm ago", int(d.Minutes()))
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%dh ago", int(d.Hours()))
+	default:
+		return fmt.Sprintf("%dd ago", int(d.Hours())/24)
+	}
 }
 
 func refreshAccountStatus(layout paths.Layout, account state.Account, codexCommand string) (state.Account, codex.RateLimitSnapshot, error) {
