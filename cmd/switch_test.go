@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"testing"
+	"time"
 
 	"github.com/rickyroynardson/codex-switch/internal/paths"
 	"github.com/rickyroynardson/codex-switch/internal/state"
@@ -34,6 +35,13 @@ func TestRunSwitchSetsActiveAccount(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, "work", registry.ActiveTag)
 	assert.Equal(t, "switched to work\n", out.String())
+
+	account, ok := registry.FindAccount("work")
+	assert.True(t, ok)
+	assert.NotEmpty(t, account.LastSwitchAt)
+
+	_, err = time.Parse(time.RFC3339, account.LastSwitchAt)
+	assert.NoError(t, err)
 }
 
 func TestRunSwitchReturnsErrorForMissingAccount(t *testing.T) {

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/rickyroynardson/codex-switch/internal/codex"
 	"github.com/rickyroynardson/codex-switch/internal/paths"
@@ -116,12 +117,18 @@ func TestRunStatusRefreshesAuthStateNeedsLogin(t *testing.T) {
 	t.Setenv(paths.EnvHome, dir)
 	stubCheckCodexLoginStatus(t, false)
 
+	used := 25
+
 	layout := paths.NewLayout(dir)
 	registry := state.NewRegistry()
 	registry.UpsertAccount(state.Account{
 		Tag:       "work",
 		AuthPath:  layout.AccountAuthPath("work"),
 		AuthState: state.AuthStateReady,
+		LastKnownStatus: &state.StatusSnapshot{
+			FiveHourUsedPct: &used,
+			RawLimitSource:  "old",
+		},
 	})
 	err := state.SaveRegistry(layout.RegistryPath, registry)
 	require.NoError(t, err)
@@ -138,6 +145,8 @@ func TestRunStatusRefreshesAuthStateNeedsLogin(t *testing.T) {
 	account, ok := registry.FindAccount("work")
 	assert.True(t, ok)
 	assert.Equal(t, state.AuthStateNeedsLogin, account.AuthState)
+	assert.NotEmpty(t, account.LastStatusCheckAt)
+	assert.Nil(t, account.LastKnownStatus)
 }
 
 func TestRunStatusPrintsQuota(t *testing.T) {
@@ -176,6 +185,26 @@ func TestRunStatusPrintsQuota(t *testing.T) {
 	assert.Contains(t, out.String(), "50%")
 	assert.Contains(t, out.String(), "1h")
 	assert.Contains(t, out.String(), "1d")
+
+	registry, err = state.LoadRegistry(layout.RegistryPath)
+	assert.NoError(t, err)
+
+	account, ok := registry.FindAccount("work")
+	assert.True(t, ok)
+
+	assert.NotEmpty(t, account.LastStatusCheckAt)
+	_, err = time.Parse(time.RFC3339, account.LastStatusCheckAt)
+	assert.NoError(t, err)
+
+	assert.NotNil(t, account.LastKnownStatus)
+	assert.NotNil(t, account.LastKnownStatus.FiveHourUsedPct)
+	assert.NotNil(t, account.LastKnownStatus.WeeklyUsedPct)
+
+	assert.Equal(t, fiveHourUsed, *account.LastKnownStatus.FiveHourUsedPct)
+	assert.Equal(t, weeklyUsed, *account.LastKnownStatus.WeeklyUsedPct)
+	assert.Equal(t, "1h", account.LastKnownStatus.FiveHourResetIn)
+	assert.Equal(t, "1d", account.LastKnownStatus.WeeklyResetIn)
+	assert.Equal(t, "test", account.LastKnownStatus.RawLimitSource)
 }
 
 func TestRunStatusDoesNotProbeQuotaWhenNeedsLogin(t *testing.T) {
@@ -224,9 +253,10 @@ func TestRunStatusPrintsSingleAccountDetail(t *testing.T) {
 	layout := paths.NewLayout(dir)
 	registry := state.NewRegistry()
 	registry.UpsertAccount(state.Account{
-		Tag:      "work",
-		AuthPath: layout.AccountAuthPath("work"),
-		Email:    "work@mail.com",
+		Tag:          "work",
+		AuthPath:     layout.AccountAuthPath("work"),
+		Email:        "work@mail.com",
+		LastSwitchAt: "2026-06-12T01:00:00Z",
 	})
 	assert.NoError(t, state.SaveRegistry(layout.RegistryPath, registry))
 
@@ -235,6 +265,13 @@ func TestRunStatusPrintsSingleAccountDetail(t *testing.T) {
 
 	err := runStatus(cmd, nil)
 	assert.NoError(t, err)
+
+	registry, err = state.LoadRegistry(layout.RegistryPath)
+	assert.NoError(t, err)
+
+	account, ok := registry.FindAccount("work")
+	assert.True(t, ok)
+	assert.NotEmpty(t, account.LastStatusCheckAt)
 
 	output := out.String()
 	assert.Contains(t, output, "tag: work")
@@ -247,6 +284,8 @@ func TestRunStatusPrintsSingleAccountDetail(t *testing.T) {
 	assert.Contains(t, output, "account: work@mail.com")
 	assert.Contains(t, output, "auth_state: ready")
 	assert.Contains(t, output, "auth_storage_path:")
+	assert.Contains(t, output, "last_switch_at: 2026-06-12T01:00:00Z")
+	assert.Contains(t, output, "last_status_check_at: "+account.LastStatusCheckAt)
 }
 
 func TestRunStatusSingleAccountReturnsErrorForUnknownTag(t *testing.T) {

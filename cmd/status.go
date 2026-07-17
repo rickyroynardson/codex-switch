@@ -11,8 +11,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var checkCodexLoginStatus = codex.CheckLoginStatus
-var probeCodexAccountLimits = codex.ProbeAccountLimits
+var (
+	checkCodexLoginStatus   = codex.CheckLoginStatus
+	probeCodexAccountLimits = codex.ProbeAccountLimits
+)
 
 func formatRemainingPercent(used *int) string {
 	if used == nil {
@@ -53,13 +55,10 @@ func runStatus(cmd *cobra.Command, args []string) error {
 
 	tag := statusTagFromCommand(cmd)
 
-	if len(registry.Accounts) == 0 {
+	if len(registry.Accounts) == 0 && tag == "" {
 		fmt.Fprintln(cmd.OutOrStdout(), "no accounts")
 		return nil
 	}
-
-	w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "ACTIVE\tTAG\t5H_LEFT\tWEEKLY_LEFT\t5H_RESET\tWEEKLY_RESET\tAUTH\tACCOUNT")
 
 	codexCommand, err := realCodexCommand(layout)
 	if err != nil {
@@ -89,64 +88,36 @@ func runStatus(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("unknown account tag: %s", tag)
 	}
 
+	w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
+	fmt.Fprintln(w, "ACTIVE\tTAG\t5H_LEFT\tWEEKLY_LEFT\t5H_RESET\tWEEKLY_RESET\tAUTH\tACCOUNT")
+
 	for i, account := range registry.Accounts {
 		active := ""
 		if account.Tag == registry.ActiveTag {
 			active = "*"
 		}
 
-		if account.AuthPath == "" {
-			account.AuthPath = layout.AccountAuthPath(account.Tag)
-		}
-
-		ready, err := checkCodexLoginStatus(codex.LoginStatusOptions{
-			CodexHome:    layout.AccountDir(account.Tag),
-			CodexCommand: codexCommand,
-		})
+		refreshed, snapshot, err := refreshAccountStatus(layout, account, codexCommand)
 		if err != nil {
 			return err
 		}
 
-		if ready {
-			account.AuthState = state.AuthStateReady
+		registry.Accounts[i] = refreshed
 
-			if email, err := codex.ReadEmailFromAuthFile(account.AuthPath); err == nil && email != "" {
-				account.Email = email
-			}
-		} else {
-			account.AuthState = state.AuthStateNeedsLogin
-		}
-		account.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
-
-		registry.Accounts[i] = account
-
-		email := account.Email
-		if email == "" {
-			email = "unknown"
-		}
-
-		authState := account.AuthState
+		authState := refreshed.AuthState
 		if authState == "" {
 			authState = state.AuthStateUnknown
 		}
 
-		snapshot := codex.UnknownRateLimitSnapshot("unknown")
-		if account.AuthState == state.AuthStateReady {
-			snapshot = probeCodexAccountLimits(codex.ProbeAccountLimitsOptions{
-				CodexHome:    layout.AccountDir(account.Tag),
-				CodexCommand: codexCommand,
-			})
-		}
-
 		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 			active,
-			account.Tag,
+			refreshed.Tag,
 			formatRemainingPercent(snapshot.FiveHourUsedPct),
 			formatRemainingPercent(snapshot.WeeklyUsedPct),
 			formatStatusValue(snapshot.FiveHourResetIn),
 			formatStatusValue(snapshot.WeeklyResetIn),
 			authState,
-			email,
+			formatStatusValue(refreshed.Email),
 		)
 	}
 
@@ -194,7 +165,11 @@ func refreshAccountStatus(layout paths.Layout, account state.Account, codexComma
 		account.AuthState = state.AuthStateNeedsLogin
 	}
 
-	account.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+	checkedAt := time.Now().UTC().Format(time.RFC3339)
+
+	account.UpdatedAt = checkedAt
+	account.LastStatusCheckAt = checkedAt
+	account.LastKnownStatus = nil
 
 	snapshot := codex.UnknownRateLimitSnapshot("unknown")
 	if account.AuthState == state.AuthStateReady {
@@ -202,6 +177,8 @@ func refreshAccountStatus(layout paths.Layout, account state.Account, codexComma
 			CodexHome:    layout.AccountDir(account.Tag),
 			CodexCommand: codexCommand,
 		})
+
+		account.LastKnownStatus = registryStatusSnapshot(snapshot)
 	}
 
 	return account, snapshot, nil
@@ -220,6 +197,8 @@ func printAccountStatusDetail(cmd *cobra.Command, layout paths.Layout, registry 
 
 	fmt.Fprintf(cmd.OutOrStdout(), "tag: %s\n", account.Tag)
 	fmt.Fprintf(cmd.OutOrStdout(), "active: %s\n", active)
+	fmt.Fprintf(cmd.OutOrStdout(), "last_switch_at: %s\n", formatStatusValue(account.LastSwitchAt))
+	fmt.Fprintf(cmd.OutOrStdout(), "last_status_check_at: %s\n", formatStatusValue(account.LastStatusCheckAt))
 	fmt.Fprintf(cmd.OutOrStdout(), "five_hour_left_pct: %s\n", formatRemainingPercent(snapshot.FiveHourUsedPct))
 	fmt.Fprintf(cmd.OutOrStdout(), "weekly_left_pct: %s\n", formatRemainingPercent(snapshot.WeeklyUsedPct))
 	fmt.Fprintf(cmd.OutOrStdout(), "five_hour_reset_in: %s\n", formatStatusValue(snapshot.FiveHourResetIn))
@@ -228,4 +207,15 @@ func printAccountStatusDetail(cmd *cobra.Command, layout paths.Layout, registry 
 	fmt.Fprintf(cmd.OutOrStdout(), "account: %s\n", formatStatusValue(account.Email))
 	fmt.Fprintf(cmd.OutOrStdout(), "auth_state: %s\n", authState)
 	fmt.Fprintf(cmd.OutOrStdout(), "auth_storage_path: %s\n", account.AuthPath)
+}
+
+func registryStatusSnapshot(snapshot codex.RateLimitSnapshot) *state.StatusSnapshot {
+	return &state.StatusSnapshot{
+		FiveHourUsedPct: snapshot.FiveHourUsedPct,
+		WeeklyUsedPct:   snapshot.WeeklyUsedPct,
+		FiveHourResetIn: snapshot.FiveHourResetIn,
+		WeeklyResetIn:   snapshot.WeeklyResetIn,
+		RawLimitSource:  snapshot.RawLimitSource,
+		PlanType:        snapshot.PlanType,
+	}
 }

@@ -48,16 +48,29 @@ func TestValidAuthState(t *testing.T) {
 }
 
 func TestRegistryJSON(t *testing.T) {
+	fiveHourUsed := 25
+	weeklyUsed := 50
+
 	r := NewRegistry()
 	r.ActiveTag = "test"
 	r.Accounts = []Account{
 		{
-			Tag:       "test",
-			AuthPath:  "/tmp/auth.json",
-			Email:     "me@test.com",
-			AuthState: AuthStateReady,
-			CreatedAt: "2026-06-12T00:00:00Z",
-			UpdatedAt: "2026-06-12T00:00:00Z",
+			Tag:               "test",
+			AuthPath:          "/tmp/auth.json",
+			Email:             "me@test.com",
+			AuthState:         AuthStateReady,
+			CreatedAt:         "2026-06-12T00:00:00Z",
+			UpdatedAt:         "2026-06-12T00:00:00Z",
+			LastSwitchAt:      "2026-06-12T00:00:00Z",
+			LastStatusCheckAt: "2026-06-12T00:00:00Z",
+			LastKnownStatus: &StatusSnapshot{
+				FiveHourUsedPct: &fiveHourUsed,
+				WeeklyUsedPct:   &weeklyUsed,
+				FiveHourResetIn: "1h",
+				WeeklyResetIn:   "2h",
+				RawLimitSource:  "test",
+				PlanType:        "pro",
+			},
 		},
 	}
 
@@ -319,6 +332,13 @@ func TestRegistrySetActiveTag(t *testing.T) {
 		err := registry.SetActiveTag("work")
 		assert.NoError(t, err)
 		assert.Equal(t, "work", registry.ActiveTag)
+
+		account, ok := registry.FindAccount("work")
+		assert.True(t, ok)
+		assert.NotEmpty(t, account.LastSwitchAt)
+
+		_, err = time.Parse(time.RFC3339, account.LastSwitchAt)
+		assert.NoError(t, err)
 	})
 
 	t.Run("return error if tag doest not exists", func(t *testing.T) {

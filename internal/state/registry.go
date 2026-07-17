@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"time"
 )
 
 type AuthState string
@@ -18,13 +19,25 @@ const (
 	AuthStateInvalid    AuthState = "invalid"
 )
 
+type StatusSnapshot struct {
+	FiveHourUsedPct *int   `json:"fiveHourUsedPct,omitempty"`
+	WeeklyUsedPct   *int   `json:"weeklyUsedPct,omitempty"`
+	FiveHourResetIn string `json:"fiveHourResetIn,omitempty"`
+	WeeklyResetIn   string `json:"weeklyResetIn,omitempty"`
+	RawLimitSource  string `json:"rawLimitSource"`
+	PlanType        string `json:"planType,omitempty"`
+}
+
 type Account struct {
-	Tag       string    `json:"tag"`
-	AuthPath  string    `json:"authPath"`
-	Email     string    `json:"email,omitempty"`
-	AuthState AuthState `json:"authState"`
-	CreatedAt string    `json:"createdAt"`
-	UpdatedAt string    `json:"updatedAt"`
+	Tag               string          `json:"tag"`
+	AuthPath          string          `json:"authPath"`
+	Email             string          `json:"email,omitempty"`
+	AuthState         AuthState       `json:"authState"`
+	CreatedAt         string          `json:"createdAt"`
+	UpdatedAt         string          `json:"updatedAt"`
+	LastSwitchAt      string          `json:"lastSwitchAt,omitempty"`
+	LastStatusCheckAt string          `json:"lastStatusCheckAt,omitempty"`
+	LastKnownStatus   *StatusSnapshot `json:"lastKnownStatus,omitempty"`
 }
 
 type Registry struct {
@@ -73,12 +86,15 @@ func (r *Registry) UpsertAccount(acc Account) {
 }
 
 func (r *Registry) SetActiveTag(tag string) error {
-	if _, ok := r.FindAccount(tag); !ok {
-		return fmt.Errorf("unknown account tag: %s", tag)
+	for i := range r.Accounts {
+		if r.Accounts[i].Tag == tag {
+			r.ActiveTag = tag
+			r.Accounts[i].LastSwitchAt = time.Now().UTC().Format(time.RFC3339)
+			return nil
+		}
 	}
 
-	r.ActiveTag = tag
-	return nil
+	return fmt.Errorf("unknown account tag: %s", tag)
 }
 
 func (r *Registry) RemoveAccount(tag string) error {
