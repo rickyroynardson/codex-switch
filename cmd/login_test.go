@@ -16,6 +16,7 @@ import (
 func TestRunLoginRegistersAccount(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv(paths.EnvHome, dir)
+	t.Setenv(EnvRealCodex, "/real/codex")
 
 	oldRunCodexLogin := runCodexLogin
 	t.Cleanup(func() {
@@ -77,6 +78,7 @@ func TestRunLoginReturnsErrorForInvalidTag(t *testing.T) {
 func TestRunLoginReturnsErrorWhenCodexLoginFails(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv(paths.EnvHome, dir)
+	t.Setenv(EnvRealCodex, "/real/codex")
 
 	oldRunCodexLogin := runCodexLogin
 	t.Cleanup(func() {
@@ -102,6 +104,7 @@ func TestRunLoginReturnsErrorWhenCodexLoginFails(t *testing.T) {
 func TestRunLoginReturnsErrorWhenAuthFileMissing(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv(paths.EnvHome, dir)
+	t.Setenv(EnvRealCodex, "/real/codex")
 
 	oldRunCodexLogin := runCodexLogin
 	t.Cleanup(func() {

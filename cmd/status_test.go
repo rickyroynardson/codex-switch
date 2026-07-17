@@ -21,8 +21,12 @@ func newTestCommandOutput() (*cobra.Command, *bytes.Buffer) {
 	return cmd, &out
 }
 
-// addRefreshFlag registers --refresh=true so a test exercises the live probe path.
-func addRefreshFlag(cmd *cobra.Command) {
+// addRefreshFlag registers --refresh=true so a test exercises the live probe
+// path, and points at a fake real-codex so realCodexCommand never has to find
+// codex on PATH (which CI runners don't have).
+func addRefreshFlag(t *testing.T, cmd *cobra.Command) {
+	t.Helper()
+	t.Setenv(EnvRealCodex, "/real/codex")
 	cmd.Flags().Bool("refresh", true, "")
 }
 
@@ -181,7 +185,7 @@ func TestRunStatusRefreshPrintsAccounts(t *testing.T) {
 	require.NoError(t, state.SaveRegistry(layout.RegistryPath, registry))
 
 	cmd, out := newTestCommandOutput()
-	addRefreshFlag(cmd)
+	addRefreshFlag(t, cmd)
 
 	require.NoError(t, runStatus(cmd, nil))
 	assert.Contains(t, out.String(), "test")
@@ -204,7 +208,7 @@ func TestRunStatusRefreshUsesUnknownForEmptyEmailAndAuthState(t *testing.T) {
 	require.NoError(t, state.SaveRegistry(layout.RegistryPath, registry))
 
 	cmd, out := newTestCommandOutput()
-	addRefreshFlag(cmd)
+	addRefreshFlag(t, cmd)
 
 	require.NoError(t, runStatus(cmd, nil))
 	assert.Contains(t, out.String(), "needs_login")
@@ -233,7 +237,7 @@ func TestRunStatusRefreshesAuthStateNeedsLogin(t *testing.T) {
 	require.NoError(t, state.SaveRegistry(layout.RegistryPath, registry))
 
 	cmd, out := newTestCommandOutput()
-	addRefreshFlag(cmd)
+	addRefreshFlag(t, cmd)
 
 	require.NoError(t, runStatus(cmd, nil))
 	assert.Contains(t, out.String(), "needs_login")
@@ -273,7 +277,7 @@ func TestRunStatusRefreshPrintsQuota(t *testing.T) {
 	require.NoError(t, state.SaveRegistry(layout.RegistryPath, registry))
 
 	cmd, out := newTestCommandOutput()
-	addRefreshFlag(cmd)
+	addRefreshFlag(t, cmd)
 
 	require.NoError(t, runStatus(cmd, nil))
 
@@ -328,7 +332,7 @@ func TestRunStatusRefreshDoesNotProbeQuotaWhenNeedsLogin(t *testing.T) {
 	require.NoError(t, state.SaveRegistry(layout.RegistryPath, registry))
 
 	cmd, _ := newTestCommandOutput()
-	addRefreshFlag(cmd)
+	addRefreshFlag(t, cmd)
 
 	require.NoError(t, runStatus(cmd, nil))
 }
@@ -360,7 +364,7 @@ func TestRunStatusRefreshPrintsSingleAccountDetail(t *testing.T) {
 
 	cmd, out := newTestCommandOutput()
 	cmd.Flags().StringP("tag", "t", "work", "")
-	addRefreshFlag(cmd)
+	addRefreshFlag(t, cmd)
 
 	require.NoError(t, runStatus(cmd, nil))
 
@@ -462,7 +466,7 @@ func TestRunStatusRefreshSingleAccountNeedsLoginDetail(t *testing.T) {
 
 	cmd, out := newTestCommandOutput()
 	cmd.Flags().StringP("tag", "t", "work", "")
-	addRefreshFlag(cmd)
+	addRefreshFlag(t, cmd)
 
 	require.NoError(t, runStatus(cmd, nil))
 
