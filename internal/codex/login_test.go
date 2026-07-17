@@ -27,7 +27,7 @@ func TestRunLoginEnsuresFileAuthConfig(t *testing.T) {
 
 	b, err := os.ReadFile(filepath.Join(opts.CodexHome, "config.toml"))
 	assert.NoError(t, err)
-	assert.Equal(t, FileAuthConfig, string(b))
+	assert.Contains(t, string(b), FileAuthConfig)
 }
 
 func TestRunLoginRunsCodexLoginWithCodexHome(t *testing.T) {

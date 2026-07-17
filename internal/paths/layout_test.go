@@ -21,14 +21,6 @@ func TestNewLayout(t *testing.T) {
 		t.Fatalf("shared dir is %q, want %q", layout.SharedDir, filepath.Join(home, "shared"))
 	}
 
-	if layout.RuntimeDir != filepath.Join(home, "runtime") {
-		t.Fatalf("runtime dir is %q, want %q", layout.RuntimeDir, filepath.Join(home, "runtime"))
-	}
-
-	if layout.CurrentHomeDir != filepath.Join(home, "runtime", "current-home") {
-		t.Fatalf("current home dir is %q, want %q", layout.CurrentHomeDir, filepath.Join(home, "runtime", "current-home"))
-	}
-
 	if layout.StateDir != filepath.Join(home, "state") {
 		t.Fatalf("state dir is %q, want %q", layout.StateDir, filepath.Join(home, "state"))
 	}

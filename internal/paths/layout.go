@@ -12,13 +12,11 @@ const EnvHome = "CODEX_SWITCH_HOME"
 var tagPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
 
 type Layout struct {
-	Home           string
-	AccountsDir    string
-	SharedDir      string
-	RuntimeDir     string
-	CurrentHomeDir string
-	StateDir       string
-	BinDir         string
+	Home        string
+	AccountsDir string
+	SharedDir   string
+	StateDir    string
+	BinDir      string
 
 	RegistryPath string
 	WrapperPath  string
@@ -48,15 +46,13 @@ func DefaultHome() (string, error) {
 
 func NewLayout(home string) Layout {
 	return Layout{
-		Home:           home,
-		AccountsDir:    filepath.Join(home, "accounts"),
-		SharedDir:      filepath.Join(home, "shared"),
-		RuntimeDir:     filepath.Join(home, "runtime"),
-		CurrentHomeDir: filepath.Join(home, "runtime", "current-home"),
-		StateDir:       filepath.Join(home, "state"),
-		BinDir:         filepath.Join(home, "bin"),
-		RegistryPath:   filepath.Join(home, "state", "accounts.json"),
-		WrapperPath:    filepath.Join(home, "bin", "codex"),
+		Home:         home,
+		AccountsDir:  filepath.Join(home, "accounts"),
+		SharedDir:    filepath.Join(home, "shared"),
+		StateDir:     filepath.Join(home, "state"),
+		BinDir:       filepath.Join(home, "bin"),
+		RegistryPath: filepath.Join(home, "state", "accounts.json"),
+		WrapperPath:  filepath.Join(home, "bin", "codex"),
 	}
 }
 

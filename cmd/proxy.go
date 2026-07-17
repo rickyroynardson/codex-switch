@@ -3,17 +3,16 @@ package cmd
 import (
 	"errors"
 
+	"github.com/rickyroynardson/codex-switch/internal/accounthome"
 	"github.com/rickyroynardson/codex-switch/internal/codex"
 	"github.com/rickyroynardson/codex-switch/internal/paths"
-	"github.com/rickyroynardson/codex-switch/internal/runtimehome"
 	"github.com/rickyroynardson/codex-switch/internal/state"
 	"github.com/spf13/cobra"
 )
 
 var (
-	assembleRuntimeHome       = runtimehome.Assemble
-	persistRuntimeSharedState = runtimehome.PersistSharedState
-	runCodexWithHome          = codex.RunWithHome
+	ensureAccountHome = accounthome.EnsureAccountHome
+	runCodexWithHome  = codex.RunWithHome
 )
 
 const EnvRealCodex = "CODEX_SWITCH_REAL_CODEX"
@@ -42,7 +41,7 @@ func runProxy(cmd *cobra.Command, args []string) error {
 		return errors.New("no active account")
 	}
 
-	if err := assembleRuntimeHome(layout, account); err != nil {
+	if err := ensureAccountHome(layout, account.Tag); err != nil {
 		return err
 	}
 
@@ -51,19 +50,11 @@ func runProxy(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	runErr := runCodexWithHome(codex.RunOptions{
-		CodexHome:    layout.CurrentHomeDir,
+	return runCodexWithHome(codex.RunOptions{
+		CodexHome:    layout.AccountDir(account.Tag),
 		CodexCommand: codexCommand,
 		Args:         args,
 	})
-
-	// try to persist the runtime-created shared state even if the Codex exits with an error.
-	persistErr := persistRuntimeSharedState(layout)
-	if runErr != nil {
-		return runErr
-	}
-
-	return persistErr
 }
 
 func init() {

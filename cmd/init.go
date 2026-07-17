@@ -5,15 +5,15 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/rickyroynardson/codex-switch/internal/accounthome"
 	"github.com/rickyroynardson/codex-switch/internal/paths"
-	"github.com/rickyroynardson/codex-switch/internal/runtimehome"
 	"github.com/rickyroynardson/codex-switch/internal/wrapper"
 	"github.com/spf13/cobra"
 )
 
 var findRealCodex = wrapper.FindRealCodex
 var installWrapper = wrapper.Install
-var importSharedState = runtimehome.ImportSharedState
+var importSharedState = accounthome.ImportSharedState
 var userHomeDir = os.UserHomeDir
 
 var initCmd = &cobra.Command{

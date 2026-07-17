@@ -34,6 +34,10 @@ func runLogin(cmd *cobra.Command, args []string) error {
 	accountHome := layout.AccountDir(tag)
 	authPath := layout.AccountAuthPath(tag)
 
+	if err := ensureAccountHome(layout, tag); err != nil {
+		return err
+	}
+
 	codexCommand, err := realCodexCommand(layout)
 	if err != nil {
 		return err

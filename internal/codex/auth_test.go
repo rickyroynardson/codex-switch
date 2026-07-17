@@ -29,13 +29,18 @@ func TestEnsureFileAuthConfigWritesConfig(t *testing.T) {
 
 	b, err := os.ReadFile(filepath.Join(dir, "config.toml"))
 	assert.NoError(t, err)
-	assert.Equal(t, FileAuthConfig, string(b))
+	assert.Equal(t, FileAuthConfig+"\n", string(b))
 }
 
-func TestEnsureFileAuthConfigOverwritesExistingConfig(t *testing.T) {
+func TestEnsureFileAuthConfigPreservesExistingConfig(t *testing.T) {
 	dir := t.TempDir()
 
-	err := os.WriteFile(filepath.Join(dir, "config.toml"), []byte("existing config"), 0600)
+	existing := `model = "gpt-5"
+
+[projects."/tmp/my-project"]
+trust_level = "trusted"
+`
+	err := os.WriteFile(filepath.Join(dir, "config.toml"), []byte(existing), 0600)
 	assert.NoError(t, err)
 
 	err = EnsureFileAuthConfig(dir)
@@ -43,7 +48,42 @@ func TestEnsureFileAuthConfigOverwritesExistingConfig(t *testing.T) {
 
 	b, err := os.ReadFile(filepath.Join(dir, "config.toml"))
 	assert.NoError(t, err)
-	assert.Equal(t, FileAuthConfig, string(b))
+	assert.Contains(t, string(b), FileAuthConfig)
+	assert.Contains(t, string(b), `model = "gpt-5"`)
+	assert.Contains(t, string(b), `trust_level = "trusted"`)
+}
+
+func TestEnsureFileAuthConfigReplacesConflictingAuthStore(t *testing.T) {
+	dir := t.TempDir()
+
+	err := os.WriteFile(filepath.Join(dir, "config.toml"), []byte(`cli_auth_credentials_store = "keychain"`+"\n"+`model = "gpt-5"`), 0600)
+	assert.NoError(t, err)
+
+	err = EnsureFileAuthConfig(dir)
+	assert.NoError(t, err)
+
+	b, err := os.ReadFile(filepath.Join(dir, "config.toml"))
+	assert.NoError(t, err)
+	assert.NotContains(t, string(b), "keychain")
+	assert.Contains(t, string(b), FileAuthConfig)
+	assert.Contains(t, string(b), `model = "gpt-5"`)
+}
+
+func TestEnsureFileAuthConfigIdempotent(t *testing.T) {
+	dir := t.TempDir()
+
+	err := EnsureFileAuthConfig(dir)
+	assert.NoError(t, err)
+
+	first, err := os.ReadFile(filepath.Join(dir, "config.toml"))
+	assert.NoError(t, err)
+
+	err = EnsureFileAuthConfig(dir)
+	assert.NoError(t, err)
+
+	second, err := os.ReadFile(filepath.Join(dir, "config.toml"))
+	assert.NoError(t, err)
+	assert.Equal(t, string(first), string(second))
 }
 
 func TestReadEmailFromAuthFile(t *testing.T) {
